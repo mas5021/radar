@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Radar Chart for Climate Metrics</title>
+  <script src="https://d3js.org/d3.v6.min.js"></script>
+  <style>
+    body {
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      background-color: #f3f3f3;
+      margin: 0; 
+      padding: 0;
+    }
+    h1 {
+      text-align: center;
+      padding-top: 20px;
+      margin-bottom: 5px;
+    }
+    #radarChart {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin: 20px auto;
+      width: 600px;
+      height: 600px;
+      position: relative;
+    }
+    svg {
+      background-color: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .axis-line {
+      stroke: #ccc;
+      stroke-width: 1px;
+    }
+    .grid-circle {
+      fill: none;
+      stroke: #CDCDCD;
+      stroke-dasharray: 2,2;
+    }
+    .radar-area {
+      fill: steelblue;
+      fill-opacity: 0.4;
+      stroke: steelblue;
+      stroke-width: 2px;
+      transition: fill-opacity 0.2s, stroke-width 0.2s;
+    }
+    .radar-area:hover {
+      fill-opacity: 0.6;
+      stroke-width: 3px;
+    }
+    .tooltip {
+      position: absolute;
+      text-align: center;
+      padding: 10px;
+      font-size: 12px;
+      background: rgba(0,0,0,0.75);
+      color: #fff;
+      border-radius: 4px;
+      pointer-events: none;
+      opacity: 0;
+      z-index: 10;
+      transition: opacity 0.3s ease;
+    }
+    text {
+      font-size: 12px;
+      fill: #333;
+      pointer-events: none;
+      user-select: none;
+    }
+    .axis-label {
+      font-size: 14px;
+      font-weight: bold;
+      fill: #2c3e50;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Radar Chart of Normalized Climate Metrics</h1>
+<div id="radarChart"></div>
+<div class="tooltip" id="radarTooltip"></div>
+
+<script>
+  // Link to your CSV
+  const csvUrl = "https://gist.githubusercontent.com/mystrycodes/dc37c95ed9bfae8f17cf7a9343174118/raw/390386e2a7b4672d9039ae7473055a4f4d321623/ClimateAndCropProductionMergedAndCleaned";
+
+  // Metrics to include in radar chart
+  const climateMetrics = [
+    "Avg_Temp (°C)",
+    "Precipitation (mm)",
+    "Humidity (%)",
+    "CO2_Concentration (ppm)",
+    "Sea_Surface_Temp (°C)"
+  ];
+
+  // Dimensions and margins (increased margins to avoid label cutoff)
+  const width = 600,
+        height = 600;
+  const margin = { top: 90, right: 90, bottom: 90, left: 90 };
+  // Adjust radius based on the new margins
+  const radius = Math.min(width, height) / 2 - margin.top;
+
+  const svg = d3.select("#radarChart")
+    .append("svg")
+    .attr("width", width)
+    .attr("height", height);
+
+  const g = svg.append("g")
+    .attr("transform", `translate(${width/2}, ${height/2})`);
+
+  // Tooltip
+  const tooltip = d3.select("#radarTooltip");
+
+  // Helper: Compute centroid of points for tooltip positioning
+  function computeCentroid(data, angleSlice) {
+    const points = data.map((d, i) => {
+      const angle = angleSlice * i - Math.PI / 2;
+      return [rScale(d.normValue) * Math.cos(angle), rScale(d.normValue) * Math.sin(angle)];
+    });
+    const cx = d3.mean(points, p => p[0]);
+    const cy = d3.mean(points, p => p[1]);
+    return [cx, cy];
+  }
+
+  // Load data from CSV
+  d3.csv(csvUrl).then(data => {
+    // Convert metric columns to numeric
+    data.forEach(d => {
+      climateMetrics.forEach(metric => {
+        d[metric] = +d[metric];
+      });
+    });
+
+    // Compute normalized means for each metric
+    let metricsData = climateMetrics.map(metric => {
+      const values = data.map(d => d[metric]);
+      const meanVal = d3.mean(values);
+      const minVal = d3.min(values);
+      const maxVal = d3.max(values);
+      let normValue = 0;
+      if (maxVal - minVal !== 0) {
+        normValue = (meanVal - minVal) / (maxVal - minVal);
+      }
+      return { metric, meanVal, normValue };
+    });
+
+    // Number of metrics
+    const total = metricsData.length;
+    // Angle for each axis
+    const angleSlice = (2 * Math.PI) / total;
+
+    // Scale for radial
+    const rScale = d3.scaleLinear().domain([0, 1]).range([0, radius]);
+
+    // Draw circular grid
+    const levels = 5;
+    g.selectAll(".grid-circle")
+      .data(d3.range(1, levels + 1))
+      .join("circle")
+      .attr("class", "grid-circle")
+      .attr("r", d => (radius / levels) * d);
+
+    // Draw axis lines
+    g.selectAll(".axis-line")
+      .data(metricsData)
+      .join("line")
+      .attr("class", "axis-line")
+      .attr("x1", 0)
+      .attr("y1", 0)
+      .attr("x2", (d, i) => rScale(1) * Math.cos(angleSlice * i - Math.PI / 2))
+      .attr("y2", (d, i) => rScale(1) * Math.sin(angleSlice * i - Math.PI / 2));
+
+    // Draw axis labels with finishing touches:
+    // Place labels outside the grid and ensure they remain horizontal.
+    g.selectAll(".axis-label")
+      .data(metricsData)
+      .join("text")
+      .attr("class", "axis-label")
+      .attr("x", (d, i) => {
+        const angle = angleSlice * i - Math.PI / 2;
+        // Increase label radius so labels aren't cut off
+        const labelRadius = rScale(1.15);
+        return labelRadius * Math.cos(angle);
+      })
+      .attr("y", (d, i) => {
+        const angle = angleSlice * i - Math.PI / 2;
+        const labelRadius = rScale(1.15);
+        return labelRadius * Math.sin(angle);
+      })
+      .attr("text-anchor", (d, i) => {
+        const angle = angleSlice * i - Math.PI / 2;
+        // Use cosine to decide alignment
+        if (Math.cos(angle) > 0.1) return "start";
+        else if (Math.cos(angle) < -0.1) return "end";
+        else return "middle";
+      })
+      .attr("dy", "0.35em")
+      .style("font-size", "12px")
+      .text(d => d.metric);
+
+    // Radial line generator for the radar polygon
+    const radarLine = d3.lineRadial()
+      .radius(d => rScale(d.normValue))
+      .angle((d, i) => i * angleSlice)
+      .curve(d3.curveLinearClosed);
+
+    // Draw the radar polygon with animation and interaction events
+    const radarArea = g.selectAll(".radar-area")
+      .data([metricsData])
+      .join("path")
+      .attr("class", "radar-area")
+      .attr("d", radarLine)
+      .on("mouseover", (event, d) => {
+        const centroid = computeCentroid(d, angleSlice);
+        tooltip.transition().duration(200).style("opacity", 0.9);
+        tooltip.html("Click for details")
+          .style("left", (centroid[0] + width/2 - 30) + "px")
+          .style("top", (centroid[1] + height/2 - 20) + "px");
+        d3.select(event.target).attr("stroke-width", "3px");
+      })
+      .on("mousemove", (event, d) => {
+        const centroid = computeCentroid(d, angleSlice);
+        tooltip.style("left", (centroid[0] + width/2 - 30) + "px")
+               .style("top", (centroid[1] + height/2 - 20) + "px");
+      })
+      .on("mouseout", (event, d) => {
+        tooltip.transition().duration(500).style("opacity", 0);
+        d3.select(event.target).attr("stroke-width", "2px");
+      })
+      .on("click", (event, d) => {
+        const centroid = computeCentroid(d, angleSlice);
+        let details = d.map(m =>
+          `<strong>${m.metric}</strong>: ${m.meanVal.toFixed(2)}`
+        ).join("<br/>");
+        tooltip.html(details)
+          .style("left", (centroid[0] + width/2 - 30) + "px")
+          .style("top", (centroid[1] + height/2 - 20) + "px");
+      })
+      .transition()
+      .duration(1000)
+      .attrTween("d", function(d) {
+        // Animate from all zeros to full polygon
+        let startData = d.map(p => ({ ...p, normValue: 0 }));
+        let interpolate = d3.interpolateArray(startData, d);
+        return t => radarLine(interpolate(t));
+      });
+  });
+</script>
+</body>
+</html>
